@@ -264,7 +264,7 @@ class UserRegister(Resource): #/register
     connection.commit()
     connection.close()
 
-    return {'message': 'User created successfully'}
+    return {'message': 'User created successfully'}, 201
 ```
 
 ##### app.py
