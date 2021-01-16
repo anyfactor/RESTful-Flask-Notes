@@ -1143,4 +1143,435 @@ class UserRegister(Resource):
     return {'message': 'User created successfully'}, 201
 ```
 
-# Start from 11
+### Displaying Items from ItemList Resources
+
+##### resources/item.py
+
+```python
+from flask_restful import Resource, reqparse
+from flask_jwt import jwt_required
+# import sqlite3
+from models.item import ItemModel
+
+Class Item(Resource):
+  parser =  reqparse.RequestParser()
+  parser.add_argument(
+      'price',
+      type=float,
+      required=True,
+      help="this field cannot be left empty"
+  )
+
+  @jwt_required()
+  def get(self, name):
+    item = ItemModel.find_by_name()
+    if item:
+      return item.json()
+    return {'message': 'item does not exist'}, 404  
+
+  def post(self, name):
+    if ItemModel.find_by_name(name):
+      return {'message': "An item with name '{}' already exists.".format(name)}, 400
+    
+    data = Item.parser.parse_args()
+    item = ItemModel(name, data['price'])
+
+    try:
+      item.save_to_db()
+    except:
+      return {'message': 'An error occurred'},
+    return item.json(), 201 
+
+  def delete(self, name):
+  item = ItemModel.find_by_name(name)
+  if item:
+    item.delete_from_db()
+  return {"message": "Item Deleted"}
+
+
+  def put(self, name):
+    data = Item.parser.parse_args()
+
+    item = ItemModel.find_by_name(name)
+    if item is None:
+      item = ItemModel(name, data['price'])
+    else:
+      item.price = data['price']
+    
+    item.save_to_db()
+    return item.json()
+
+
+class ItemList(Resource):
+  def get(self):
+    # connection = sqlite3.connect('data.db')
+    # cursor = connection.cursor()
+
+    # query = "SELECT * FROM items"
+    # result = cursor.execute(query)
+    # items = []
+    # for row in result:
+    #   items.append(
+    #     {'name': row[0], 'price': row[1]}
+    #   )
+
+    # connection.close()
+
+    # return {'items': items}
+
+    return {'items': [item.json() for item in ItemModel.query.all()]}
+    # all returns all the object in the database
+```
+
+### No more creating tables manually
+
+##### app.py
+
+```python
+from flask import Flask
+from flask_restful import Api
+from flask_jwt import JWT
+
+from security import authenticate, identity
+from resources.user import UserRegister
+from resources.item import Item, ItemList
+
+app = Flask(__name__)
+
+app.config['SQLALCHEMY_DATABSE_URI'] = 'sqlite:///data.db'
+app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+
+app.secret_key = "secret_key"
+api = Api(app)
+
+@app.before_first_request
+# this is a flask request
+# app.py will run the function below it before initializing the app
+def create_tables():
+  db.create_all()
+  # this references to the sqlite command above.
+
+jwt = JWT(app, authenticate, identity) #/auth
+api.add_resource(Item, '/item/<string:name>')
+api.add_resource(ItemList, '/items')
+api.add_resource(UserRegister, '/register')
+
+if __name__ = "__main__":
+  from db import db
+  db.init_app(app)
+  app.run(port=5000, debug=True)
+
+```
+
+### Creating a new StoreModel
+
+
+##### models/store.py
+
+copy pasted from models/item.py with some changes
+
+```python
+from db import db
+
+class StoreModel(db.Model):
+  __tablename__ = 'items'
+
+  id = db.Column(db.Integer, primary_key=True)
+  name = db.Column(db.String(80)) #changed
+
+  def __init__(self, name, price):
+    self.name = name #changed
+
+  def json(self):
+    return {'name': self:name, 'items': self.items} #changed
+
+  @classmethod
+  def find_by_name(cls, name):
+    return cls.query.filter_by(name=name).first()
+  
+  def save_to_db(self):
+    db.session.add(self)
+    db.session.commit()
+  
+  def delete_from_db(self):
+    db.session.delete(self)
+    db.session.commit()
+```
+
+##### models/item.py
+
+```python
+from db import db
+
+class ItemModel(db.Model):
+  __tablename__ = 'items'
+
+  id = db.Column(db.Integer, primary_key=True)
+  name = db.Column(db.String(80))
+  price = db.Column(db.Float(precision=2))
+
+  store_id = db.column(db.Integer, db.ForeignKey('stores.id'))
+  # we are putting the select item in the select store
+  # we are grouping items based on the storeid
+  # this is a link created by store.id
+  # store.id is the primary key of another db
+  # where there is foreign key reference you cannot delete the main source
+  # main source where it is a primary key
+  # you first need to delete the foreign key reference
+  # then delete that main source
+  store = db.relationship('StoreModel')
+  # this connects the db for the foreign key stuff
+
+  def __init__(self, name, price):
+    self.name = name
+    self.price = price
+    self.store_id = store_id
+  
+  def json(self):
+    return {'name': self.name, 'price': self.price}
+
+  @classmethod
+  def find_by_name(cls, name):
+    return cls.query.filter_by(name=name).first()
+
+  def save_to_db(self):
+    db.session.add(self)
+    db.session.commit()
+
+  def delete_from_db(self):
+    db.session.delete(self)
+    db.session.commit()
+
+```
+
+##### models/store.py
+
+copy pasted from models/item.py with some changes
+
+```python
+from db import db
+
+class StoreModel(db.Model):
+  __tablename__ = 'items'
+
+  id = db.Column(db.Integer, primary_key=True)
+  name = db.Column(db.String(80))
+
+  items = db.relationship('ItemModel', lazy='dynamic')
+  # This is a backreference
+  # This is a list
+  # this many to one relationship
+  # we are now getting back a list of items based on the foreign key relationship
+  # But this is a greedy operation
+  # When we have a lot of data this could result in a slow operation
+  # So, we added the lazy dynamic thing
+
+  def __init__(self, name, price):
+    self.name = name
+
+  def json(self):
+    # return {'name': self:name, 'items': [item.json() for item in self.items]}
+    # this is a fine statement if we didn't have lazy dynamic
+    # but lazydynamic converts the self.items to not a list but a query builder
+    return {'name': self:name, 'items': [item.json() for item in self.items.all()]}
+    # by adding all() we are converting the query builder to an actual list
+    # now there is a catch
+    # without lazydynamic, we access the table once, and we don't repeat
+    # with lazydynamic, we don't access the table until we do access the json()
+    # but we keep access the table everytime we trigger the json function
+    # There is  tradeoff of speed of creation and speed calling the json() function
+
+  @classmethod
+  def find_by_name(cls, name):
+    return cls.query.filter_by(name=name).first()
+  
+  def save_to_db(self):
+    db.session.add(self)
+    db.session.commit()
+  
+  def delete_from_db(self):
+    db.session.delete(self)
+    db.session.commit()
+```
+
+##### resources/item.py
+
+```python
+from flask_restful import Resource, reqparse
+from flask_jwt import jwt_required
+from models.item import ItemModel
+
+Class Item(Resource):
+  parser =  reqparse.RequestParser()
+  parser.add_argument(
+      'price',
+      type=float,
+      required=True,
+      help="this field cannot be left empty"
+  )
+
+  # accounting for store_id
+  parser.add_argument(
+      'store_id',
+      type=int,
+      required=True,
+      help="every item needs an store id"
+  )
+  # now for ItemModel reference we have to pass the store_id
+
+  @jwt_required()
+  def get(self, name):
+    item = ItemModel.find_by_name()
+    if item:
+      return item.json()
+    return {'message': 'item does not exist'}, 404  
+
+  def post(self, name):
+    if ItemModel.find_by_name(name):
+      return {'message': "An item with name '{}' already exists.".format(name)}, 400
+    
+    data = Item.parser.parse_args()
+    # item = ItemModel(name, data['price'], data['store_id'])
+    item = ItemModel(name, **data)
+
+    try:
+      item.save_to_db()
+    except:
+      return {'message': 'An error occurred'},
+    return item.json(), 201 
+
+  def delete(self, name):
+  item = ItemModel.find_by_name(name)
+  if item:
+    item.delete_from_db()
+  return {"message": "Item Deleted"}
+
+
+  def put(self, name):
+    data = Item.parser.parse_args()
+
+    item = ItemModel.find_by_name(name)
+    if item is None:
+      # item = ItemModel(name, data['price'], data['store_id'])
+      item = ItemModel(name, **data)
+    else:
+      item.price = data['price']
+      item.store_id = data['store_id']
+    
+    item.save_to_db()
+    return item.json()
+
+
+class ItemList(Resource):
+  def get(self):
+    return {'items': [item.json() for item in ItemModel.query.all()]}
+```
+
+# Creating Store Resource
+
+Creating the file
+
+##### resources/store.py
+
+```python
+from flask_restful import Resource
+from models.store import StoreModel
+
+class Store(Resource):
+  def get(name):
+    store = StoreModel.find_by_name(name)
+    if store:
+      return store.json()
+    return {'message': 'Store not found'}, 404
+
+  def post(self, name):
+    if StoreModel.find_by_name(name):
+      return {'message': 'Store name exists'}, 400
+
+    store = StoreModel(name)
+    try:
+      store.save_to_db()
+    except:
+      return {'message': 'an error occured'}, 500
+
+    return store.json(), 201
+
+  def delete(self, name):
+    store = StoreModel.find_by_name(name):
+    if store:
+      store.delete_from_db()
+    
+    return {'message': 'Store Deleted'}
+
+class StoreList(Resource):
+  def get(self):
+    return {'stores': [store.json() for store in StoreModel.query.all()]}
+```
+
+##### app.py
+
+```python
+from flask import Flask
+from flask_restful import Api
+from flask_jwt import JWT
+
+from security import authenticate, identity
+from resources.user import UserRegister
+from resources.item import Item, ItemList
+from resources.store import Store, StoreList #changed
+# app.py> resource > model > db 
+
+app = Flask(__name__)
+
+app.config['SQLALCHEMY_DATABSE_URI'] = 'sqlite:///data.db'
+app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+
+app.secret_key = "secret_key"
+api = Api(app)
+
+@app.before_first_request
+def create_tables():
+  db.create_all()
+
+jwt = JWT(app, authenticate, identity) #/auth
+
+api.add_resource(Store, '/store/<string:name>') #changed
+api.add_resource(StoreList, '/stores') #changed
+api.add_resource(Item, '/item/<string:name>')
+api.add_resource(ItemList, '/items')
+api.add_resource(UserRegister, '/register')
+
+if __name__ = "__main__":
+  from db import db
+  db.init_app(app)
+  app.run(port=5000, debug=True)
+
+```
+
+### Final testing
+
+When reintializing always delete the data.db (```rm data.db```)
+
+When POSTing to item/name, remember to modify the request with the new store ID.
+
+```JSON
+{
+  "price": 15.99,
+  "store_id": 2
+}
+```
+
+Even though you may have not initialized the StoreModel (meaning that store_id reference has not been initialized and you are also working with foreign keys), SQLite3 just ignores that but that won't work with PostGres or MySQL.
+
+Now when you create the store with the store_id it will automatically adjust to that.
+
+store_id is auto increasing here. First POST request made in /store/test results in a store with an id of 1. Second request makes it another store with an id of 2 and this will result in the showing of the product.
+
+Create this new endpoints
+
+Request | Endpoint
+---|---
+GET | /store/<name>
+POST | /store/<name>
+DEL | /store/<name>
+GET | /stores/
